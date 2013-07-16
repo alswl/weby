@@ -2,6 +2,7 @@
 
 import sys
 import json
+import logging
 
 from django.core.servers.basehttp import WSGIServer, WSGIRequestHandler
 from django.core.handlers.wsgi import WSGIHandler
@@ -14,6 +15,10 @@ from django.http import HttpResponse
 
 from webx.url import RegexURLResolver
 from webx.result import JsonResult, TemplateResult
+from webx.url import Http404 as webxHttp404
+
+
+logger = logging.getLogger(__name__)
 
 
 class MyWSGIHandler(WSGIHandler):
@@ -86,12 +91,6 @@ class MyWSGIHandler(WSGIHandler):
                         response = middleware_method(request, response)
                     response = response.render()
 
-                if isinstance(response, JsonResult) or isinstance(response, TemplateResult):
-                    data = json.dumps(response.context)
-                    response_kwargs = {'content_type': 'application/json'}
-                    response = HttpResponse(data, **response_kwargs)
-                else:
-                    raise NotImplmentedError()
 
             except http.Http404 as e:
                 logger.warning('Not Found: %s', request.path,
@@ -100,11 +99,35 @@ class MyWSGIHandler(WSGIHandler):
                                 'request': request
                             })
                 if settings.DEBUG:
-                    response = debug.technical_404_response(request, e)
+                    pass
+                    #response = debug.technical_404_response(request, e)
                 else:
                     try:
                         callback, param_dict = resolver.resolve404()
                         response = callback(request, **param_dict)
+                    except:
+                        signals.got_request_exception.send(sender=self.__class__, request=request)
+                        response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+            except webxHttp404 as e:
+                logger.warning('Not Found: %s', request.path,
+                            extra={
+                                'status_code': 404,
+                                'request': request
+                            })
+                if settings.DEBUG:
+                    #response = debug.technical_404_response(request, e)
+                    try:
+                        resolver_match = resolver.resolve('/404/')
+                        callback_name, callback, callback_args, callback_kwargs = resolver_match
+                        response = callback(request, *callback_args, **callback_kwargs)
+                    except:
+                        signals.got_request_exception.send(sender=self.__class__, request=request)
+                        response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+                else:
+                    try:
+                        resolver_match = resolver.resolve('/404/')
+                        callback_name, callback, callback_args, callback_kwargs = resolver_match
+                        response = callback(request, *callback_args, **callback_kwargs)
                     except:
                         signals.got_request_exception.send(sender=self.__class__, request=request)
                         response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
@@ -146,10 +169,15 @@ class MyWSGIHandler(WSGIHandler):
             signals.got_request_exception.send(sender=self.__class__, request=request)
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
+        if isinstance(response, JsonResult) or isinstance(response, TemplateResult):
+            data = json.dumps(response.context)
+            response_kwargs = {'content_type': 'application/json'}
+            response = HttpResponse(data, **response_kwargs)
+        else:
+            raise NotImplmentedError()
         return response
 
-def run(application):
-    httpd = WSGIServer(('127.0.0.1', 8080), WSGIRequestHandler,
-                      ipv6=False)
+def run(application, addr, port):
+    httpd = WSGIServer((addr, port), WSGIRequestHandler, ipv6=False)
     httpd.set_app(application)
     httpd.serve_forever()
