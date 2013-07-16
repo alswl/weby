@@ -12,10 +12,11 @@ from django.core import signals
 from django import http
 from django.core import exceptions
 from django.http import HttpResponse
-
 from webx.url import RegexURLResolver
 from webx.result import JsonResult, TemplateResult
 from webx.url import Http404 as webxHttp404
+
+from utils import format_value
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class MyWSGIHandler(WSGIHandler):
             # the try/except so we don't get a spurious "unbound local
             # variable" exception in the event an exception is raised before
             # resolver is set
+            request.user_id = None # fix for japa
             urlconf = settings.ROOT_URLCONF
             urls = __import__(urlconf)
             urlpatterns = urls.urlpatterns
@@ -170,11 +172,11 @@ class MyWSGIHandler(WSGIHandler):
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
         if isinstance(response, JsonResult) or isinstance(response, TemplateResult):
-            data = json.dumps(response.context)
+            data = json.dumps(format_value(response.context))
             response_kwargs = {'content_type': 'application/json'}
             response = HttpResponse(data, **response_kwargs)
         else:
-            raise NotImplmentedError()
+            raise NotImplementedError()
         return response
 
 def run(application, addr, port):
