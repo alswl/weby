@@ -1,6 +1,7 @@
 # coding=utf8
 
 from datetime import datetime, date
+import json
 
 
 def format_dic(dic):
@@ -10,21 +11,23 @@ def format_dic(dic):
     return dic
 
 
-def format_value(value):
-
+def format_value(value, include_fields=[], is_compact=True):
     if isinstance(value, dict):
         return format_dic(value)
     elif isinstance(value, list):
         return format_list(value)
-
     elif isinstance(value, datetime):
         return value.isoformat()
-    elif isinstance(value, date):
-        return value.isoformat()
-    #elif isinstance(value, API_V1_Mixture):
-        #return value.to_api_dic(is_compact=True)
+    #elif isinstance(value, bool):
+        #return 1 if value else 0
+    elif hasattr(value, 'to_api_dic'):
+        return value.to_api_dic(include_fields, is_compact)
     else:
-        return value
+        try:
+            json.dumps(value)
+            return value
+        except:
+            return unicode(value)
 
 
 def format_list(l):
