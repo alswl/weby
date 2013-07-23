@@ -11,9 +11,9 @@ from django.conf import settings
 from django.core import signals
 from django import http
 from django.core import exceptions
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from webx.url import RegexURLResolver
-from webx.result import JsonResult, TemplateResult
+from webx.result import JsonResult, TemplateResult, RedirectResult
 from webx.url import Http404 as webxHttp404
 
 from utils import format_value
@@ -175,6 +175,10 @@ class MyWSGIHandler(WSGIHandler):
             data = json.dumps(format_value(response.context))
             response_kwargs = {'content_type': 'application/json'}
             response = HttpResponse(data, **response_kwargs)
+        elif isinstance(response, RedirectResult):
+            target = response.target
+            response = HttpResponse("", status=302)
+            response['Location'] = target
         else:
             raise NotImplementedError()
         return response
