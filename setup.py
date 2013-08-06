@@ -4,7 +4,7 @@ from distutils.core import setup
 
 setup(
     name='weby',
-    version='0.1.2',
+    version='0.1.4',
     description='WSGI Server for Donkey',
     author='ddd',
     author_email='jingchao.di@duitang.com',
