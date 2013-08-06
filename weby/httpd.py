@@ -3,6 +3,7 @@
 import sys
 import json
 import logging
+import time
 
 from django.core.servers.basehttp import WSGIServer, WSGIRequestHandler
 from django.core.handlers.wsgi import WSGIHandler
@@ -21,11 +22,18 @@ from utils import format_value
 
 logger = logging.getLogger(__name__)
 
+#logger_performance = logging.getLogger()
+#logFormatter = logging.Formatter('%(asctime)s [%(levelname)s]  %(name)s -  %(message)s')
+#logHandler.setFormatter(logFormatter)
+#logger_performance.propagate = 0
+#logger_performance.setLevel(logging.INFO)
+
 
 class MyWSGIHandler(WSGIHandler):
 
     def get_response(self, request):
         "Returns an HttpResponse object for the given HttpRequest"
+        start = time.time()
         try:
             # Setup default url resolver for this thread, this code is outside
             # the try/except so we don't get a spurious "unbound local
@@ -181,6 +189,7 @@ class MyWSGIHandler(WSGIHandler):
             response['Location'] = target
         else:
             raise NotImplementedError()
+        logger.info('This request take %f ms' %((time.time() - start) * 1000))
         return response
 
 def run(application, addr, port):
