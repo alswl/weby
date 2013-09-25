@@ -12,7 +12,8 @@ from django.conf import settings
 from django.core import signals
 from django import http
 from django.core import exceptions
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import (HttpResponse, HttpResponseRedirect,
+                         HttpResponseServerError)
 from webx.url import RegexURLResolver
 from webx.result import JsonResult, TemplateResult, RedirectResult
 from webx.url import Http404 as webxHttp404
@@ -187,6 +188,8 @@ class MyWSGIHandler(WSGIHandler):
             target = response.target
             response = HttpResponse("", status=302)
             response['Location'] = target
+        elif isinstance(response, HttpResponseServerError):
+            pass
         else:
             raise NotImplementedError()
         logger.info('This request take %f ms' %((time.time() - start) * 1000))
