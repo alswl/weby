@@ -43,6 +43,7 @@ class MyWSGIHandler(WSGIHandler):
         self._request_middleware = []
         self._response_middleware = []
         self._view_middleware = []
+        self._exception_middleware = []
         self.init_middleware()
 
     def init_middleware(self):
@@ -202,8 +203,7 @@ class MyWSGIHandler(WSGIHandler):
             except: # Handle everything else, including SuspiciousOperation, etc.
                 # Get the exception info now, in case another exception is thrown later.
                 #signals.got_request_exception.send(sender=self.__class__, request=request)
-                #response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
-                pass
+                response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
         finally:
             # Reset URLconf for this thread on the way out for complete
             # isolation of request.urlconf
