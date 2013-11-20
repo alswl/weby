@@ -17,6 +17,8 @@ from django.http import (HttpResponse, HttpResponseRedirect,
 from webx.url import RegexURLResolver
 from webx.result import JsonResult, TemplateResult, RedirectResult
 from webx.url import Http404 as webxHttp404
+from webx import settings as webx_settings
+from webx.utils.importlib import import_module
 
 from utils import format_value
 
@@ -30,10 +32,46 @@ logger = logging.getLogger(__name__)
 #logger_performance.setLevel(logging.INFO)
 
 
+def adjust_request(request):
+    request.get_views_path = request.get_full_path
+
+
 class MyWSGIHandler(WSGIHandler):
+
+    def __init__(self, *args, **kwargs):
+        super(MyWSGIHandler, self).__init__(*args, **kwargs)
+        self._request_middleware = []
+        self._response_middleware = []
+        self._view_middleware = []
+        self.init_middleware()
+
+    def init_middleware(self):
+        for middleware_path in webx_settings.MIDDLEWARE_CLASSES:
+            try:
+                mw_module, mw_classname = middleware_path.rsplit('.', 1)
+            except ValueError:
+                raise ValueError('%s isn\'t a middleware module' % middleware_path)
+            try:
+                mod = import_module(mw_module)
+            except ImportError, e:
+                raise ImportError('Error importing middleware %s: "%s"' % (mw_module, e))
+            try:
+                mw_class = getattr(mod, mw_classname)
+            except AttributeError:
+                raise AttributeError('Middleware module "%s" does not define a "%s" class' % (mw_module, mw_classname))
+            try:
+                mw_instance = mw_class()
+            except exceptions.MiddlewareNotUsed:
+                continue
+
+            if hasattr(mw_instance, 'process_request'):
+                self._request_middleware.append(mw_instance.process_request)
+            if hasattr(mw_instance, 'process_response'):
+                self._response_middleware.insert(0, mw_instance.process_response)
 
     def get_response(self, request):
         "Returns an HttpResponse object for the given HttpRequest"
+        adjust_request(request)
         start = time.time()
         try:
             # Setup default url resolver for this thread, this code is outside
@@ -50,6 +88,7 @@ class MyWSGIHandler(WSGIHandler):
             try:
                 response = None
                 # Apply request middleware
+
                 for middleware_method in self._request_middleware:
                     response = middleware_method(request)
                     if response:
@@ -174,7 +213,8 @@ class MyWSGIHandler(WSGIHandler):
         try:
             # Apply response middleware, regardless of the response
             for middleware_method in self._response_middleware:
-                response = middleware_method(request, response)
+                #response = middleware_method(request, response)
+                middleware_method(request, response)
             #response = self.apply_response_fixes(request, response)
         except: # Any exception should be gathered and handled
             signals.got_request_exception.send(sender=self.__class__, request=request)
