@@ -32,9 +32,25 @@ logger = logging.getLogger(__name__)
 #logger_performance.setLevel(logging.INFO)
 
 
-def adjust_request(request):
+def _adjust_request(request):
     request.get_views_path = request.get_full_path
 
+def _add_set_cookie(response):
+    def _set_cookie(key, value, max_age, domain, path, secure, httponly):
+        if not hasattr(response, '_weby_cookies'):
+            response._weby_cookies = []
+            
+        response._weby_cookies.append({
+            'key': key,
+            'value': value,
+            'max_age': max_age,
+            'domain': domain,
+            'path': path,
+            'secure': secure,
+            'httponly': httponly,
+        })
+
+    response.set_cookie = _set_cookie
 
 class MyWSGIHandler(WSGIHandler):
 
@@ -72,7 +88,7 @@ class MyWSGIHandler(WSGIHandler):
 
     def get_response(self, request):
         "Returns an HttpResponse object for the given HttpRequest"
-        adjust_request(request)
+        _adjust_request(request)
         start = time.time()
         try:
             # Setup default url resolver for this thread, this code is outside
@@ -91,7 +107,8 @@ class MyWSGIHandler(WSGIHandler):
                 # Apply request middleware
 
                 for middleware_method in self._request_middleware:
-                    response = middleware_method(request)
+                    #response = middleware_method(request)
+                    middleware_method(request)
                     if response:
                         break
 
@@ -116,6 +133,7 @@ class MyWSGIHandler(WSGIHandler):
                 if response is None:
                     try:
                         response = callback(request, *callback_args, **callback_kwargs)
+                        _add_set_cookie(response)
                     except Exception as e:
                         # If the view raised an exception, run it through exception
                         # middleware, and if the exception middleware returns a
@@ -220,6 +238,7 @@ class MyWSGIHandler(WSGIHandler):
             signals.got_request_exception.send(sender=self.__class__, request=request)
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
+        _response = response
         if isinstance(response, JsonResult) or isinstance(response, TemplateResult):
             data = json.dumps(format_value(response.context))
             response_kwargs = {'content_type': 'application/json'}
@@ -232,6 +251,11 @@ class MyWSGIHandler(WSGIHandler):
             pass
         else:
             raise NotImplementedError()
+
+        if hasattr(_response, '_weby_cookies') and hasattr(response, 'cookies'):
+            for cookie in _response._weby_cookies:
+                response.cookies[cookie['key']] = cookie['value']
+            
         logger.info('This request take %f ms' %((time.time() - start) * 1000))
         return response
 
