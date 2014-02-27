@@ -12,10 +12,13 @@ from django.conf import settings
 from django.core import signals
 from django import http
 from django.core import exceptions
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import (HttpResponse, HttpResponseRedirect,
+                         HttpResponseServerError)
 from webx.url import RegexURLResolver
 from webx.result import JsonResult, TemplateResult, RedirectResult
 from webx.url import Http404 as webxHttp404
+from webx import settings as webx_settings
+from webx.utils.importlib import import_module
 
 from utils import format_value
 
@@ -29,10 +32,63 @@ logger = logging.getLogger(__name__)
 #logger_performance.setLevel(logging.INFO)
 
 
+def _adjust_request(request):
+    request.get_views_path = request.get_full_path
+
+def _add_set_cookie(response):
+    def _set_cookie(key, value, max_age, domain, path, secure, httponly):
+        if not hasattr(response, '_weby_cookies'):
+            response._weby_cookies = []
+            
+        response._weby_cookies.append({
+            'key': key,
+            'value': value,
+            'max_age': max_age,
+            'domain': domain,
+            'path': path,
+            'secure': secure,
+            'httponly': httponly,
+        })
+
+    response.set_cookie = _set_cookie
+
 class MyWSGIHandler(WSGIHandler):
+
+    def __init__(self, *args, **kwargs):
+        super(MyWSGIHandler, self).__init__(*args, **kwargs)
+        self._request_middleware = []
+        self._response_middleware = []
+        self._view_middleware = []
+        self._exception_middleware = []
+        self.init_middleware()
+
+    def init_middleware(self):
+        for middleware_path in webx_settings.MIDDLEWARE_CLASSES:
+            try:
+                mw_module, mw_classname = middleware_path.rsplit('.', 1)
+            except ValueError:
+                raise ValueError('%s isn\'t a middleware module' % middleware_path)
+            try:
+                mod = import_module(mw_module)
+            except ImportError, e:
+                raise ImportError('Error importing middleware %s: "%s"' % (mw_module, e))
+            try:
+                mw_class = getattr(mod, mw_classname)
+            except AttributeError:
+                raise AttributeError('Middleware module "%s" does not define a "%s" class' % (mw_module, mw_classname))
+            try:
+                mw_instance = mw_class()
+            except exceptions.MiddlewareNotUsed:
+                continue
+
+            if hasattr(mw_instance, 'process_request'):
+                self._request_middleware.append(mw_instance.process_request)
+            if hasattr(mw_instance, 'process_response'):
+                self._response_middleware.insert(0, mw_instance.process_response)
 
     def get_response(self, request):
         "Returns an HttpResponse object for the given HttpRequest"
+        _adjust_request(request)
         start = time.time()
         try:
             # Setup default url resolver for this thread, this code is outside
@@ -49,8 +105,10 @@ class MyWSGIHandler(WSGIHandler):
             try:
                 response = None
                 # Apply request middleware
+
                 for middleware_method in self._request_middleware:
-                    response = middleware_method(request)
+                    #response = middleware_method(request)
+                    middleware_method(request)
                     if response:
                         break
 
@@ -75,6 +133,7 @@ class MyWSGIHandler(WSGIHandler):
                 if response is None:
                     try:
                         response = callback(request, *callback_args, **callback_kwargs)
+                        _add_set_cookie(response)
                     except Exception as e:
                         # If the view raised an exception, run it through exception
                         # middleware, and if the exception middleware returns a
@@ -162,8 +221,7 @@ class MyWSGIHandler(WSGIHandler):
             except: # Handle everything else, including SuspiciousOperation, etc.
                 # Get the exception info now, in case another exception is thrown later.
                 #signals.got_request_exception.send(sender=self.__class__, request=request)
-                #response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
-                pass
+                response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
         finally:
             # Reset URLconf for this thread on the way out for complete
             # isolation of request.urlconf
@@ -173,12 +231,14 @@ class MyWSGIHandler(WSGIHandler):
         try:
             # Apply response middleware, regardless of the response
             for middleware_method in self._response_middleware:
-                response = middleware_method(request, response)
+                #response = middleware_method(request, response)
+                middleware_method(request, response)
             #response = self.apply_response_fixes(request, response)
         except: # Any exception should be gathered and handled
             signals.got_request_exception.send(sender=self.__class__, request=request)
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
+        _response = response
         if isinstance(response, JsonResult) or isinstance(response, TemplateResult):
             data = json.dumps(format_value(response.context))
             response_kwargs = {'content_type': 'application/json'}
@@ -187,8 +247,15 @@ class MyWSGIHandler(WSGIHandler):
             target = response.target
             response = HttpResponse("", status=302)
             response['Location'] = target
+        elif isinstance(response, HttpResponseServerError):
+            pass
         else:
             raise NotImplementedError()
+
+        if hasattr(_response, '_weby_cookies') and hasattr(response, 'cookies'):
+            for cookie in _response._weby_cookies:
+                response.cookies[cookie['key']] = cookie['value']
+            
         logger.info('This request take %f ms' %((time.time() - start) * 1000))
         return response
 
