@@ -33,9 +33,25 @@ logger = logging.getLogger(__name__)
 
 
 def _adjust_request(request):
+    def _set_cookie(key, value='', max_age=-1, path='/',
+                    domain=None, secure=False, httponly=False):
+        if not hasattr(request, '_weby_cookies'):
+            request._weby_cookies = []
+        request._weby_cookies.append({
+            'key': key,
+            'value': value,
+            'max_age': max_age,
+            'domain': domain,
+            'path': path,
+            'secure': secure,
+            'httponly': httponly,
+        })
+
+    request.set_cookie = _set_cookie
     request.get_views_path = request.get_full_path
 
-def _add_set_cookie(response):
+
+def _adjust_response(response):
     def _set_cookie(key, value, max_age, domain, path, secure, httponly):
         if not hasattr(response, '_weby_cookies'):
             response._weby_cookies = []
@@ -133,7 +149,7 @@ class MyWSGIHandler(WSGIHandler):
                 if response is None:
                     try:
                         response = callback(request, *callback_args, **callback_kwargs)
-                        _add_set_cookie(response)
+                        _adjust_response(response)
                     except Exception as e:
                         # If the view raised an exception, run it through exception
                         # middleware, and if the exception middleware returns a
@@ -252,8 +268,8 @@ class MyWSGIHandler(WSGIHandler):
         else:
             raise NotImplementedError()
 
-        if hasattr(_response, '_weby_cookies') and hasattr(response, 'cookies'):
-            for cookie in _response._weby_cookies:
+        if hasattr(request, '_weby_cookies'):  # fix for japa session
+            for cookie in request._weby_cookies:
                 response.cookies[cookie['key']] = cookie['value']
             
         logger.info('This request take %f ms' %((time.time() - start) * 1000))
