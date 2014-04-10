@@ -46,9 +46,12 @@ def _adjust_request(request):
             'secure': secure,
             'httponly': httponly,
         })
+    def _get_views_path():
+        return request._view_path
 
+    request._view_path = None
     request.set_cookie = _set_cookie
-    request.get_views_path = request.get_full_path
+    request.get_views_path = _get_views_path
 
 
 def _adjust_response(response):
@@ -122,6 +125,10 @@ class MyWSGIHandler(WSGIHandler):
                 response = None
                 # Apply request middleware
 
+                resolver_match = resolver.resolve(request.path_info)
+                callback_name, callback, callback_args, callback_kwargs = resolver_match
+                request._view_path = callback_name
+
                 for middleware_method in self._request_middleware:
                     #response = middleware_method(request)
                     middleware_method(request)
@@ -136,8 +143,6 @@ class MyWSGIHandler(WSGIHandler):
                         #resolver = urlresolvers.RegexURLResolver(r'^/', urlconf)
                         #resolver = RegexURLResolver(r'^/', urlconf)
 
-                    resolver_match = resolver.resolve(request.path_info)
-                    callback_name, callback, callback_args, callback_kwargs = resolver_match
                     #request.resolver_match = resolver_match
 
                     # Apply view middleware
