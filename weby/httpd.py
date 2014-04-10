@@ -7,7 +7,6 @@ import time
 
 from django.core.servers.basehttp import WSGIServer, WSGIRequestHandler
 from django.core.handlers.wsgi import WSGIHandler
-from django.conf import settings
 #from django.core import urlresolvers
 from django.core import signals
 from django import http
@@ -22,7 +21,8 @@ from webx.utils.importlib import import_module
 
 from utils import format_value
 
-
+DEBUG = True
+ROOT_URLCONF = 'urls'
 logger = logging.getLogger(__name__)
 
 #logger_performance = logging.getLogger()
@@ -55,7 +55,7 @@ def _adjust_response(response):
     def _set_cookie(key, value, max_age, domain, path, secure, httponly):
         if not hasattr(response, '_weby_cookies'):
             response._weby_cookies = []
-            
+
         response._weby_cookies.append({
             'key': key,
             'value': value,
@@ -112,7 +112,7 @@ class MyWSGIHandler(WSGIHandler):
             # variable" exception in the event an exception is raised before
             # resolver is set
             request.user_id = None # fix for japa
-            urlconf = settings.ROOT_URLCONF
+            urlconf = ROOT_URLCONF
             urls = __import__(urlconf)
             urlpatterns = urls.urlpatterns
             #urlresolvers.set_urlconf(urlconf)
@@ -183,7 +183,7 @@ class MyWSGIHandler(WSGIHandler):
                                 'status_code': 404,
                                 'request': request
                             })
-                if settings.DEBUG:
+                if DEBUG:
                     pass
                     #response = debug.technical_404_response(request, e)
                 else:
@@ -199,7 +199,7 @@ class MyWSGIHandler(WSGIHandler):
                                 'status_code': 404,
                                 'request': request
                             })
-                if settings.DEBUG:
+                if DEBUG:
                     #response = debug.technical_404_response(request, e)
                     try:
                         resolver_match = resolver.resolve('/404/')
@@ -255,9 +255,14 @@ class MyWSGIHandler(WSGIHandler):
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
         _response = response
-        if isinstance(response, JsonResult) or isinstance(response, TemplateResult):
+        if isinstance(response, JsonResult):
             data = json.dumps(format_value(response.context))
             response_kwargs = {'content_type': 'application/json'}
+            response = HttpResponse(data, **response_kwargs)
+        elif isinstance(response, TemplateResult):
+            from webx import tiny; t=tiny.Tiny()
+            data = t.render(response.template, response.context, request)
+            response_kwargs = {'content_type': 'text/html'}
             response = HttpResponse(data, **response_kwargs)
         elif isinstance(response, RedirectResult):
             target = response.target
@@ -270,7 +275,10 @@ class MyWSGIHandler(WSGIHandler):
 
         if hasattr(request, '_weby_cookies'):  # fix for japa session
             for cookie in request._weby_cookies:
-                response.cookies[cookie['key']] = cookie['value']
+                response.set_cookie(**cookie)
+        if hasattr(_response, '_weby_cookies'):  # fix for japa session
+            for cookie in _response._weby_cookies:
+                response.set_cookie(**cookie)
             
         logger.info('This request take %f ms' %((time.time() - start) * 1000))
         return response

@@ -1,4 +1,4 @@
-from django.utils.datastructures import MergeDict
+from .datastructures import MergeDict
 
 
 def get_long(self, key, default_=None):
