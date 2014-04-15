@@ -46,12 +46,17 @@ def _adjust_request(request):
             'secure': secure,
             'httponly': httponly,
         })
+
     def _get_views_path():
         return request._view_path
+
+    def _redirect(target):
+        return RedirectResult(target)
 
     request._view_path = None
     request.set_cookie = _set_cookie
     request.get_views_path = _get_views_path
+    request.redirect = _redirect
 
 
 def _adjust_response(response):
