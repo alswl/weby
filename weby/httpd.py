@@ -32,7 +32,14 @@ logger = logging.getLogger(__name__)
 #logger_performance.setLevel(logging.INFO)
 
 
+class MockRequest(object):
+
+    def set_status(self, status):
+        self.status = status
+
+
 def _adjust_request(request):
+
     def _set_cookie(key, value='', max_age=-1, path='/',
                     domain=None, secure=False, httponly=False):
         if not hasattr(request, '_weby_cookies'):
@@ -53,10 +60,16 @@ def _adjust_request(request):
     def _redirect(target):
         return RedirectResult(target)
 
+    def _forward(target):
+        # FIXME
+        return RedirectResult(target)
+
     request._view_path = None
     request.set_cookie = _set_cookie
     request.get_views_path = _get_views_path
     request.redirect = _redirect
+    request.forward = _forward
+    request.response = MockRequest()
 
 
 def _adjust_response(response):
@@ -289,6 +302,8 @@ class MyWSGIHandler(WSGIHandler):
         if hasattr(_response, '_weby_cookies'):  # fix for japa session
             for cookie in _response._weby_cookies:
                 response.set_cookie(**cookie)
+        if hasattr(request.response, 'status'):  # fix for japa status
+            response.status_code = request.response.status
             
         logger.info('This request take %f ms' %((time.time() - start) * 1000))
         return response
