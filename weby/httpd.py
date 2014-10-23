@@ -1,4 +1,5 @@
 # coding=utf-8
+import csv
 
 import sys
 import json
@@ -14,7 +15,7 @@ from django.core import exceptions
 from django.http import (HttpResponse, HttpResponseRedirect,
                          HttpResponseServerError)
 from webx.url import RegexURLResolver
-from webx.result import JsonResult, TemplateResult, RedirectResult
+from webx.result import JsonResult, TemplateResult, RedirectResult, CSVFileResult, SimpleResult
 from webx.url import Http404 as webxHttp404
 from webx import settings as webx_settings
 from webx.utils.importlib import import_module
@@ -65,6 +66,7 @@ def _adjust_request(request):
         return RedirectResult(target)
 
     request._view_path = None
+    request.REQUEST0 = request.REQUEST
     request.set_cookie = _set_cookie
     request.get_views_path = _get_views_path
     request.redirect = _redirect
@@ -135,10 +137,14 @@ class MyWSGIHandler(WSGIHandler):
             request.user_id = None # fix for japa
             urlconf = ROOT_URLCONF
             urls = __import__(urlconf)
-            urlpatterns = urls.urlpatterns
+            #urlpatterns = urls.urlpatterns
+            host_url_patterns_map = urls.host_url_patterns_map
             #urlresolvers.set_urlconf(urlconf)
             #resolver = urlresolvers.RegexURLResolver(r'^/', urlconf)
-            resolver = RegexURLResolver(urlpatterns)
+            resolver_map = {
+                k: RegexURLResolver(v) for k, v in host_url_patterns_map.items()
+            }
+            resolver = resolver_map[request.META.get('HTTP_HOST', 'default')]
             try:
                 response = None
                 # Apply request middleware
@@ -278,7 +284,18 @@ class MyWSGIHandler(WSGIHandler):
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
         _response = response
-        if isinstance(response, JsonResult):
+        if isinstance(_response, SimpleResult):
+            response = HttpResponse(
+                _response.get_content(),
+                content_type=(_response.get_content_type()),
+                status=(_response.get_status())
+            )
+            headers = _response.get_headers()
+            if headers:
+                for k, v in headers:
+                    response[k] = v
+
+        elif isinstance(response, JsonResult):
             data = json.dumps(format_value(response.context))
             response_kwargs = {'content_type': 'application/json'}
             response = HttpResponse(data, **response_kwargs)
@@ -291,6 +308,16 @@ class MyWSGIHandler(WSGIHandler):
             target = response.target
             response = HttpResponse("", status=302)
             response['Location'] = target
+        elif isinstance(response, CSVFileResult):
+            rows = response.rows
+            name = response.name
+            response_kwargs = {'content_type': 'text/csv'}
+            response = HttpResponse("", **response_kwargs)
+            response['Content-Disposition'] = 'attachment; filename="%s.csv"' % (name)
+            writer = csv.writer(response, delimiter='\t')
+            for row in rows:
+                writer.writerow(row)
+
         elif isinstance(response, HttpResponseServerError):
             pass
         else:
