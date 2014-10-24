@@ -144,7 +144,7 @@ class MyWSGIHandler(WSGIHandler):
             resolver_map = {
                 k: RegexURLResolver(v) for k, v in host_url_patterns_map.items()
             }
-            resolver = resolver_map[request.META.get('HTTP_HOST', 'default')]
+            resolver = resolver_map.get(request.META.get('HTTP_HOST'), resolver_map['default'])
             try:
                 response = None
                 # Apply request middleware
@@ -154,9 +154,9 @@ class MyWSGIHandler(WSGIHandler):
                 request._view_path = callback_name
 
                 for middleware_method in self._request_middleware:
-                    #response = middleware_method(request)
-                    middleware_method(request)
+                    response = middleware_method(request)
                     if response:
+                        _adjust_response(response)
                         break
 
                 if response is None:
@@ -173,6 +173,7 @@ class MyWSGIHandler(WSGIHandler):
                     for middleware_method in self._view_middleware:
                         response = middleware_method(request, callback, callback_args, callback_kwargs)
                         if response:
+                            _adjust_response(response)
                             break
 
                 if response is None:
@@ -186,6 +187,7 @@ class MyWSGIHandler(WSGIHandler):
                         for middleware_method in self._exception_middleware:
                             response = middleware_method(request, e)
                             if response:
+                                _adjust_response(response)
                                 break
                         if response is None:
                             raise
@@ -203,6 +205,7 @@ class MyWSGIHandler(WSGIHandler):
                 if hasattr(response, 'render') and callable(response.render):
                     for middleware_method in self._template_response_middleware:
                         response = middleware_method(request, response)
+                        _adjust_response(response)
                     response = response.render()
 
 
@@ -219,6 +222,7 @@ class MyWSGIHandler(WSGIHandler):
                     try:
                         callback, param_dict = resolver.resolve404()
                         response = callback(request, **param_dict)
+                        _adjust_response(response)
                     except:
                         signals.got_request_exception.send(sender=self.__class__, request=request)
                         response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
@@ -234,17 +238,21 @@ class MyWSGIHandler(WSGIHandler):
                         resolver_match = resolver.resolve('/404/')
                         callback_name, callback, callback_args, callback_kwargs = resolver_match
                         response = callback(request, *callback_args, **callback_kwargs)
+                        _adjust_response(response)
                     except:
                         signals.got_request_exception.send(sender=self.__class__, request=request)
                         response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+                        _adjust_response(response)
                 else:
                     try:
                         resolver_match = resolver.resolve('/404/')
                         callback_name, callback, callback_args, callback_kwargs = resolver_match
                         response = callback(request, *callback_args, **callback_kwargs)
+                        _adjust_response(response)
                     except:
                         signals.got_request_exception.send(sender=self.__class__, request=request)
                         response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+                        _adjust_response(response)
             except exceptions.PermissionDenied:
                 logger.warning(
                     'Forbidden (Permission denied): %s', request.path,
@@ -255,11 +263,13 @@ class MyWSGIHandler(WSGIHandler):
                 try:
                     callback, param_dict = resolver.resolve403()
                     response = callback(request, **param_dict)
+                    _adjust_response(response)
                 except:
                     signals.got_request_exception.send(
                             sender=self.__class__, request=request)
                     response = self.handle_uncaught_exception(request,
                             resolver, sys.exc_info())
+                    _adjust_response(response)
             except SystemExit:
                 # Allow sys.exit() to actually exit. See tickets #1023 and #4701
                 raise
@@ -267,6 +277,7 @@ class MyWSGIHandler(WSGIHandler):
                 # Get the exception info now, in case another exception is thrown later.
                 #signals.got_request_exception.send(sender=self.__class__, request=request)
                 response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+                _adjust_response(response)
         finally:
             # Reset URLconf for this thread on the way out for complete
             # isolation of request.urlconf
@@ -282,6 +293,7 @@ class MyWSGIHandler(WSGIHandler):
         except: # Any exception should be gathered and handled
             signals.got_request_exception.send(sender=self.__class__, request=request)
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+            _adjust_response(response)
 
         _response = response
         if isinstance(_response, SimpleResult):
